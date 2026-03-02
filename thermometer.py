@@ -1,3 +1,8 @@
+#pin 3 = 3v3
+#pin 2 = GPIO4, 4.7k resistor to 3v3
+#pin 1 = ground
+
+
 #sudo python3 thermometer.py
 
 # SPDX-FileCopyrightText: 2019 Mikey Sklar for Adafruit Industries

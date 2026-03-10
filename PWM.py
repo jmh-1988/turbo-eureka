@@ -11,7 +11,8 @@ PWM2 = 19   # Channel B
 FREQ = 100000                 # 100 kHz
 PERIOD_US = int(1e6 / FREQ)  # 10 us
 
-DEAD_US = 1                  # 1 us dead time (minimum practical)
+#DEAD_US = 1                  # 1 us dead time 
+DEAD_US = 0.5
 ON_US = (PERIOD_US // 2) - DEAD_US   # 4 us
 
 pi = pigpio.pi()

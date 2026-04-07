@@ -1,0 +1,122 @@
+# sudo pigpiod must be running
+
+import pigpio
+import time
+import sys
+
+# ---------------- PWM CONFIG ----------------
+PWM1 = 12
+PWM2 = 19
+
+FREQ = 100000
+PERIOD_US = int(1e6 / FREQ)
+
+DEAD_US = 2
+ON_US = (PERIOD_US // 2) - DEAD_US
+
+# ---------------- ULTRASONIC CONFIG ----------------
+TRIG = 17
+ECHO = 27
+RELAY = 18
+
+THRESHOLD = 20  # cm
+TIMEOUT = 0.023
+
+# ---------------- INIT ----------------
+pi = pigpio.pi()
+if not pi.connected:
+    print("Failed to connect to pigpio daemon.")
+    sys.exit(1)
+
+# Set modes
+pi.set_mode(PWM1, pigpio.OUTPUT)
+pi.set_mode(PWM2, pigpio.OUTPUT)
+
+pi.set_mode(TRIG, pigpio.OUTPUT)
+pi.set_mode(ECHO, pigpio.INPUT)
+pi.set_mode(RELAY, pigpio.OUTPUT)
+
+pi.write(TRIG, 0)
+time.sleep(0.05)
+
+# ---------------- PWM WAVEFORM ----------------
+wf = []
+
+wf.append(pigpio.pulse(1 << PWM1, 1 << PWM2, ON_US))
+wf.append(pigpio.pulse(0, (1 << PWM1) | (1 << PWM2), DEAD_US))
+wf.append(pigpio.pulse(1 << PWM2, 1 << PWM1, ON_US))
+wf.append(pigpio.pulse(0, (1 << PWM1) | (1 << PWM2), DEAD_US))
+
+pi.wave_clear()
+pi.wave_add_generic(wf)
+
+wave_id = pi.wave_create()
+if wave_id < 0:
+    print("Failed to create wave")
+    sys.exit(1)
+
+pi.wave_send_repeat(wave_id)
+
+print("PWM running | Dead time:", DEAD_US, "us")
+
+# ---------------- DISTANCE FUNCTION ----------------
+def measure_distance():
+    # Trigger pulse
+    pi.write(TRIG, 1)
+    time.sleep(0.00001)
+    pi.write(TRIG, 0)
+
+    start_time = time.perf_counter()
+
+    # Wait for echo HIGH
+    while pi.read(ECHO) == 0:
+        if time.perf_counter() - start_time > TIMEOUT:
+            return None
+
+    pulse_start = time.perf_counter()
+
+    # Wait for echo LOW
+    while pi.read(ECHO) == 1:
+        if time.perf_counter() - pulse_start > TIMEOUT:
+            return None
+
+    pulse_end = time.perf_counter()
+
+    elapsed = pulse_end - pulse_start
+    distance = (elapsed * 34300) / 2
+    return distance
+
+# ---------------- MAIN LOOP ----------------
+MEASURE_INTERVAL = 0.2
+last_measure = 0
+
+try:
+    while True:
+        now = time.time()
+
+        if now - last_measure >= MEASURE_INTERVAL:
+            last_measure = now
+
+            dist = measure_distance()
+            print("Distance:", dist)
+
+            # Relay logic (your requirement)
+            if dist is None or dist < THRESHOLD:
+                pi.write(RELAY, 1)
+            else:
+                pi.write(RELAY, 0)
+
+        time.sleep(0.01)
+
+except KeyboardInterrupt:
+    pass
+
+# ---------------- CLEANUP ----------------
+pi.wave_tx_stop()
+pi.wave_clear()
+pi.write(PWM1, 0)
+pi.write(PWM2, 0)
+pi.write(RELAY, 0)
+pi.stop()
+
+print("Stopped.")

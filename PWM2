@@ -31,7 +31,6 @@ if not pi.connected:
 # Set modes
 pi.set_mode(PWM1, pigpio.OUTPUT)
 pi.set_mode(PWM2, pigpio.OUTPUT)
-
 pi.set_mode(TRIG, pigpio.OUTPUT)
 pi.set_mode(ECHO, pigpio.INPUT)
 pi.set_mode(RELAY, pigpio.OUTPUT)
@@ -39,9 +38,8 @@ pi.set_mode(RELAY, pigpio.OUTPUT)
 pi.write(TRIG, 0)
 time.sleep(0.05)
 
-# ---------------- PWM WAVEFORM ----------------
+# ---------------- CREATE PWM WAVE ----------------
 wf = []
-
 wf.append(pigpio.pulse(1 << PWM1, 1 << PWM2, ON_US))
 wf.append(pigpio.pulse(0, (1 << PWM1) | (1 << PWM2), DEAD_US))
 wf.append(pigpio.pulse(1 << PWM2, 1 << PWM1, ON_US))
@@ -55,27 +53,20 @@ if wave_id < 0:
     print("Failed to create wave")
     sys.exit(1)
 
-pi.wave_send_repeat(wave_id)
-
-print("PWM running | Dead time:", DEAD_US, "us")
-
 # ---------------- DISTANCE FUNCTION ----------------
 def measure_distance():
-    # Trigger pulse
     pi.write(TRIG, 1)
     time.sleep(0.00001)
     pi.write(TRIG, 0)
 
     start_time = time.perf_counter()
 
-    # Wait for echo HIGH
     while pi.read(ECHO) == 0:
         if time.perf_counter() - start_time > TIMEOUT:
             return None
 
     pulse_start = time.perf_counter()
 
-    # Wait for echo LOW
     while pi.read(ECHO) == 1:
         if time.perf_counter() - pulse_start > TIMEOUT:
             return None
@@ -89,6 +80,7 @@ def measure_distance():
 # ---------------- MAIN LOOP ----------------
 MEASURE_INTERVAL = 0.2
 last_measure = 0
+pwm_running = False
 
 try:
     while True:
@@ -100,11 +92,27 @@ try:
             dist = measure_distance()
             print("Distance:", dist)
 
-            # Relay logic (your requirement)
-            if dist is None or dist < THRESHOLD:
+            condition = (dist is None) or (dist < THRESHOLD)
+
+            # ----------- TURN ON -----------
+            if condition and not pwm_running:
+                print(">>> ACTIVATING PWM + RELAY")
+
+                pi.wave_send_repeat(wave_id)
                 pi.write(RELAY, 1)
-            else:
+
+                pwm_running = True
+
+            # ----------- TURN OFF -----------
+            elif not condition and pwm_running:
+                print(">>> DEACTIVATING PWM + RELAY")
+
+                pi.wave_tx_stop()
+                pi.write(PWM1, 0)
+                pi.write(PWM2, 0)
                 pi.write(RELAY, 0)
+
+                pwm_running = False
 
         time.sleep(0.01)
 

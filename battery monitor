@@ -1,0 +1,132 @@
+import smbus
+import time
+
+BQ_ADDR = 0x08  # Typical I2C address
+bus = smbus.SMBus(1)
+
+# =========================
+# LOW LEVEL FUNCTIONS
+# =========================
+def read_byte(reg):
+    return bus.read_byte_data(BQ_ADDR, reg)
+
+def write_byte(reg, val):
+    bus.write_byte_data(BQ_ADDR, reg, val)
+
+def read_word(reg):
+    data = bus.read_word_data(BQ_ADDR, reg)
+    # Swap endian
+    return ((data << 8) & 0xFF00) | (data >> 8)
+
+# =========================
+# INITIALIZATION
+# =========================
+def init_bq():
+    # Exit shutdown, enable ADC
+    write_byte(0x04, 0x19)  # SYS_CTRL1 (TEMP_SEL + ADC_EN)
+    write_byte(0x05, 0x40)  # SYS_CTRL2 (CC_EN)
+
+# =========================
+# READ CELL VOLTAGES
+# =========================
+def read_cell_voltage(cell):
+    # Each cell is 2 bytes starting at 0x0C
+    base = 0x0C
+    reg = base + (cell - 1) * 2
+    raw = read_word(reg)
+    
+    # Convert (per datasheet ~0.0001 V per LSB typical)
+    voltage = raw * 0.0001
+    return voltage
+
+# =========================
+# PACK VOLTAGE
+# =========================
+def read_pack_voltage():
+    raw = read_word(0x2A)
+    return raw * 0.001  # scaling depends on config
+
+# =========================
+# CURRENT
+# =========================
+def read_current():
+    raw = read_word(0x32)
+    
+    # Signed conversion
+    if raw > 32767:
+        raw -= 65536
+    
+    # Depends on shunt resistor (example 1 mΩ)
+    current = raw * 0.001
+    return current
+
+# =========================
+# TEMPERATURE
+# =========================
+def read_temp():
+    raw = read_word(0x2C)
+    return raw * 0.1  # approximate
+
+# =========================
+# FAULT STATUS
+# =========================
+def read_faults():
+    return read_byte(0x0A)
+
+# =========================
+# CONTROL FETS
+# =========================
+def enable_charging(enable=True):
+    val = read_byte(0x05)
+    if enable:
+        val |= 0x01
+    else:
+        val &= ~0x01
+    write_byte(0x05, val)
+
+def enable_discharging(enable=True):
+    val = read_byte(0x05)
+    if enable:
+        val |= 0x02
+    else:
+        val &= ~0x02
+    write_byte(0x05, val)
+
+# =========================
+# MAIN LOOP
+# =========================
+def main():
+    init_bq()
+    
+    while True:
+        try:
+            print("---- Battery Status ----")
+            
+            # Read 4 cells (change as needed)
+            for i in range(1, 5):
+                v = read_cell_voltage(i)
+                print(f"Cell {i}: {v:.3f} V")
+                
+                # Overvoltage protection (example)
+                if v > 4.2:
+                    print("⚠ Overvoltage! Cutting charge")
+                    enable_charging(False)
+
+            pack_v = read_pack_voltage()
+            current = read_current()
+            temp = read_temp()
+            faults = read_faults()
+
+            print(f"Pack Voltage: {pack_v:.2f} V")
+            print(f"Current: {current:.2f} A")
+            print(f"Temp: {temp:.1f} C")
+            print(f"Faults: 0x{faults:02X}")
+
+            time.sleep(1)
+
+        except Exception as e:
+            print("Error:", e)
+            time.sleep(1)
+
+if __name__ == "__main__":
+    main()
